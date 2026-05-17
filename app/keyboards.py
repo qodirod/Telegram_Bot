@@ -1,5 +1,8 @@
 from datetime import datetime
+
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
 from app.data.matches import MATCHES
 
 
@@ -164,3 +167,28 @@ def team_choice(
             ]
         ]
     )
+
+
+def leaderboard_keyboard(users, lang: str = "en") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    medals = {
+        1: "🥇",
+        2: "🥈",
+        3: "🥉"
+    }
+
+    for index, user in enumerate(users, start=1):
+        medal = medals.get(index, "👤")
+
+        name = user.first_name or user.username or f"User {user.tg_id}"
+        balance = getattr(user, "balance", 100)
+
+        builder.button(
+            text=f"{medal} {index}. {name} — ${balance}",
+            callback_data=f"profile:{user.tg_id}"
+        )
+
+    builder.adjust(1)
+
+    return builder.as_markup()

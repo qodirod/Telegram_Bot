@@ -38,13 +38,6 @@ def get_main_keyboard(lang: str):
 
 
 def parse_match_time(match_time: str) -> str:
-    """
-    Converts:
-    3:00 p.m.  -> 15:00
-    10:00 p.m. -> 22:00
-    12:00 a.m. -> 00:00
-    15:00      -> 15:00
-    """
     time_text = str(match_time).strip().lower()
 
     time_text = time_text.replace("a.m.", "AM")
@@ -64,14 +57,18 @@ def parse_match_time(match_time: str) -> str:
         return "00:00"
 
 
-def get_countdown(match_date: str, match_time: str, lang: str = "en") -> str:
-    now = datetime.now()
+def get_match_datetime(match_date: str, match_time: str) -> datetime:
     time_24 = parse_match_time(match_time)
 
-    match_datetime = datetime.strptime(
+    return datetime.strptime(
         f"{match_date} {time_24}",
         "%Y-%m-%d %H:%M"
     )
+
+
+def get_countdown(match_date: str, match_time: str, lang: str = "en") -> str:
+    now = datetime.now()
+    match_datetime = get_match_datetime(match_date, match_time)
 
     difference = match_datetime - now
 
@@ -94,6 +91,10 @@ def get_countdown(match_date: str, match_time: str, lang: str = "en") -> str:
     if hours > 0:
         return f"{hours}h {minutes}m"
     return f"{minutes}m"
+
+
+def match_has_started(match_date: str, match_time: str) -> bool:
+    return datetime.now() >= get_match_datetime(match_date, match_time)
 
 
 def get_match_info(code: str):
@@ -166,9 +167,8 @@ async def about_en(message: Message):
 
     await message.answer(
         "This project is a private FIFA World Cup 2026 prediction game for family and friends only.\n\n"
-        "In this game, each participant chooses the team they believe will win. "
-        "After the FIFA World Cup matches are completed, points will be calculated based on the results. "
-        "The participant with the highest number of points will receive a gift.\n\n"
+        "Each player starts with $100. For every correct prediction, you get +$1. "
+        "For every wrong prediction, you get -$1.\n\n"
         "Voting is available before each match, but it closes 1 day before the match. "
         "After voting is closed, participants will no longer be able to choose a team for that match.\n\n"
         "⚠️ Each participant can submit only one prediction per match, so please choose carefully.",
@@ -183,9 +183,8 @@ async def about_ru(message: Message):
     await message.answer(
         "Этот проект — частная игра-прогноз на Чемпионат мира по футболу FIFA 2026 "
         "только для семьи и друзей.\n\n"
-        "В этой игре каждый участник выбирает команду, которая, по его мнению, победит. "
-        "После завершения матчей Чемпионата мира очки будут подсчитаны на основе результатов. "
-        "Участник, набравший наибольшее количество очков, получит подарок.\n\n"
+        "Каждый игрок начинает со $100. За правильный прогноз вы получаете +$1. "
+        "За неправильный прогноз вы получаете -$1.\n\n"
         "Голосование доступно до каждого матча, но закрывается за 1 день до матча. "
         "После закрытия голосования участники больше не смогут выбрать команду на этот матч.\n\n"
         "⚠️ Каждый участник может сделать только один прогноз на каждый матч, поэтому выбирайте внимательно.",
@@ -301,13 +300,12 @@ async def choose_match(callback: CallbackQuery):
     separator = "против" if lang == "ru" else "vs"
     countdown = get_countdown(match["date"], match["time"], lang)
 
-    if today >= voting_close_day:
+    if today >= voting_close_day or match_has_started(match["date"], match["time"]):
         await callback.message.answer(
             (
                 f"❌ Голосование закрыто.\n\n"
                 f"⚽ {team1_display} {separator} {team2_display}\n"
                 f"🕒 {match['time']}\n\n"
-                f"Голосование закрылось: {voting_close_day.strftime('%d.%m.%Y')}.\n"
                 f"Выбор команды больше недоступен."
             )
             if lang == "ru"
@@ -315,7 +313,6 @@ async def choose_match(callback: CallbackQuery):
                 f"❌ Voting is closed.\n\n"
                 f"⚽ {team1_display} {separator} {team2_display}\n"
                 f"🕒 {match['time']}\n\n"
-                f"Voting closed on {voting_close_day.strftime('%B %d, %Y')}.\n"
                 f"Team selection is no longer available."
             )
         )
@@ -373,7 +370,7 @@ async def save_prediction(callback: CallbackQuery):
 
     voting_close_day = match_day - timedelta(days=1)
 
-    if today >= voting_close_day:
+    if today >= voting_close_day or match_has_started(match["date"], match["time"]):
         await callback.message.answer(
             "❌ Голосование уже закрыто. Выбор команды больше недоступен."
             if lang == "ru"
@@ -442,8 +439,12 @@ async def my_bets(message: Message):
     text_lines = ["Ваши прогнозы:" if lang == "ru" else "Your predictions:"]
 
     for pred, game in predictions:
-        pts = f" ({pred.points} pts)" if game.result else ""
-        line = f"{game.team1} vs {game.team2} — {pred.selected_team}{pts}"
+        if game.result:
+            money = f" ({pred.points}$)"
+        else:
+            money = ""
+
+        line = f"{game.team1} vs {game.team2} — {pred.selected_team}{money}"
         text_lines.append(line)
 
     await message.answer("\n".join(text_lines), reply_markup=get_main_keyboard(lang))
@@ -457,19 +458,62 @@ async def leaderboard(message: Message):
 
     if not users:
         await message.answer(
-            "Пока нет результатов." if lang == "ru" else "No scores yet.",
+            "Пока нет игроков." if lang == "ru" else "No players yet.",
             reply_markup=get_main_keyboard(lang)
         )
         return
 
-    lines = ["🏆 Таблица лидеров:" if lang == "ru" else "🏆 Leaderboard:"]
+    text = (
+        "🏆 Денежная таблица лидеров FIFA 2026\n\n"
+        "Нажмите на игрока, чтобы открыть профиль:"
+        if lang == "ru"
+        else
+        "🏆 FIFA 2026 Money Leaderboard\n\n"
+        "Tap a player to open their profile:"
+    )
 
-    for idx, user in enumerate(users, start=1):
-        name = user.first_name or user.username or f"User {user.tg_id}"
-        points_word = "очков" if lang == "ru" else "pts"
-        lines.append(f"{idx}. {name} — {user.total_points} {points_word}")
+    await message.answer(
+        text,
+        reply_markup=kb.leaderboard_keyboard(users, lang)
+    )
 
-    await message.answer("\n".join(lines), reply_markup=get_main_keyboard(lang))
+
+@router.callback_query(F.data.startswith("profile:"))
+async def open_user_profile(callback: CallbackQuery):
+    lang = await get_lang(callback.from_user.id)
+
+    tg_id = int(callback.data.split(":")[1])
+    user = await rq.get_user_by_tg_id(tg_id)
+
+    if not user:
+        await callback.answer(
+            "Пользователь не найден." if lang == "ru" else "User not found.",
+            show_alert=True
+        )
+        return
+
+    predictions = await rq.get_user_predictions(tg_id)
+
+    name = user.first_name or user.username or f"User {user.tg_id}"
+    username = f"@{user.username}" if user.username else "No username"
+
+    text = (
+        f"👤 Профиль игрока\n\n"
+        f"Имя: {name}\n"
+        f"Username: {username}\n"
+        f"Баланс: ${user.balance}\n"
+        f"Прогнозов: {len(predictions)}"
+        if lang == "ru"
+        else
+        f"👤 Player Profile\n\n"
+        f"Name: {name}\n"
+        f"Username: {username}\n"
+        f"Balance: ${user.balance}\n"
+        f"Predictions: {len(predictions)}"
+    )
+
+    await callback.message.answer(text)
+    await callback.answer()
 
 
 @router.message(Command(commands=["setresult"]))
@@ -502,17 +546,13 @@ async def set_result_cmd(message: Message):
     success = await rq.set_game_result(code, winner, result)
 
     if success:
-        await message.answer(f"Result set: {code} — {winner} wins ({result}). Points recalculated.")
+        await message.answer(f"Result set: {code} — {winner} wins ({result}). Money recalculated.")
     else:
         await message.answer(f"Game with code {code} not found.")
 
 
 @router.message(Command(commands=["leaderboard"]))
 async def leaderboard_admin(message: Message):
-    if not is_admin(message.from_user.id):
-        await message.answer("You do not have permission to use this command.")
-        return
-
     await leaderboard(message)
 
 
