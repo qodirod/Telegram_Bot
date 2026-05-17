@@ -15,18 +15,22 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     tg_id = mapped_column(BigInteger)
 
-class Teams(Base):
-    __tablename__ = 'categories'
+class Team(Base):
+    __tablename__ = 'teams'
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(25))
+    wins: Mapped[int] = mapped_column()
+
 
 class Game(Base):
-    __tablename__ = 'items'
+    __tablename__ = 'games'
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(25))
-    description: Mapped[str] = mapped_column(String(120))
+    result: Mapped[str] = mapped_column(String(120))
+
+
 
 async def async_main():
     async with engine.begin() as conn:
